@@ -1,0 +1,23 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.env
+
+# SQLite
+*.db
+*.sqlite
+*.sqlite3
+
+# Node
+node_modules/
+frontend/dist/
+
+# IDE
+.vscode/
+.idea/
+
+# Testing and generated files
+.pytest_cache/
+.coverage
