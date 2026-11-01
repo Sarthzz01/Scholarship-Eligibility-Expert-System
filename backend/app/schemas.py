@@ -181,3 +181,21 @@ class AStarRequest(BaseModel):
     scheme_id: int
     student: Optional[StudentProfileSchema] = None
     available_documents: Optional[list[str]] = None
+
+# --- AI Chatbot Schemas ---
+
+class ChatMessage(BaseModel):
+    role: str = Field(pattern="^(user|assistant|system)$")
+    content: str
+    timestamp: Optional[str] = None
+
+class ChatRequest(BaseModel):
+    message: str = Field(min_length=1, max_length=2000)
+    history: Optional[list[ChatMessage]] = Field(default_factory=list)
+    student: Optional[StudentProfileSchema] = None
+
+class ChatResponse(BaseModel):
+    reply: str
+    matched_schemes: list[dict] = Field(default_factory=list)
+    suggested_questions: list[str] = Field(default_factory=list)
+

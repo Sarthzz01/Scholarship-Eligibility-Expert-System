@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useSearchParams, Link } from 'react-router-dom'
 import {
   AlertTriangle,
@@ -55,6 +55,7 @@ export default function AdminDashboard() {
   const [evaluations, setEvaluations] = useState([])
   const [search, setSearch] = useState('')
   const [filterType, setFilterType] = useState('active') // 'active', 'all', 'archived', 'official', 'demo'
+  const [ruleFieldFilter, setRuleFieldFilter] = useState('all')
 
   const [editingScheme, setEditingScheme] = useState(null)
   const [isModalOpen, setIsModalOpen] = useState(false)
@@ -96,8 +97,62 @@ export default function AdminDashboard() {
     if (filterType === 'archived') return s.is_archived
     if (filterType === 'official') return s.is_official && !s.is_archived
     if (filterType === 'demo') return !s.is_official && !s.is_archived
-    return true // 'all'
   })
+
+  // Extract all encoded criteria across active schemes for Rules Engine Inspector
+  const allRules = useMemo(() => {
+    const list = []
+    schemes.forEach(s => {
+      if (!s.is_archived && s.criteria) {
+        s.criteria.forEach((c, idx) => {
+          list.push({
+            id: `${s.id}-${idx}`,
+            scheme_id: s.id,
+            scheme_name: s.name,
+            field: c.field || 'General',
+            operator: c.operator || 'eq',
+            value: c.value,
+            message: c.message || '',
+            scheme: s
+          })
+        })
+      }
+    })
+    return list
+  }, [schemes])
+
+  const filteredRules = useMemo(() => {
+    return allRules.filter(r => {
+      if (ruleFieldFilter === 'all') return true
+      return r.field === ruleFieldFilter
+    })
+  }, [allRules, ruleFieldFilter])
+
+  const outcomes = useMemo(() => {
+    return stats.evaluation_outcomes || {
+      eligible: stats.evaluation_metrics?.eligible_matches || 0,
+      ineligible: stats.evaluation_metrics?.ineligible_matches || 0,
+      needs_information: stats.evaluation_metrics?.needs_information_matches || 0,
+      closed_expired: stats.evaluation_metrics?.closed_expired_matches || 0
+    }
+  }, [stats])
+
+  const totalOutcomes = useMemo(() => {
+    return (outcomes.eligible + outcomes.ineligible + outcomes.needs_information + outcomes.closed_expired) || 1
+  }, [outcomes])
+
+  const unmetList = useMemo(() => {
+    return Array.isArray(stats.frequently_unmet_criteria)
+      ? stats.frequently_unmet_criteria
+      : Object.entries(stats.frequently_unmet_criteria || {}).map(([k, v]) => ({
+          criteria: k.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase()),
+          count: v
+        }))
+  }, [stats])
+
+  const maxUnmet = useMemo(() => {
+    return Math.max(...unmetList.map(u => u.count), 1)
+  }, [unmetList])
 
   async function handleSaveScheme(schemePayload) {
     setError('')
@@ -251,11 +306,14 @@ export default function AdminDashboard() {
 
         {/* Subtabs for Admin */}
         <div className="dashboard-subtabs">
-          <button className={`subtab-btn ${currentTab === 'overview' || currentTab === 'schemes' ? 'active' : ''}`} onClick={() => switchTab('schemes')}>
-            <BookOpenCheck size={16} /> Scholarship Schemes ({schemes.length})
+          <button className={`subtab-btn ${currentTab === 'overview' ? 'active' : ''}`} onClick={() => switchTab('overview')}>
+            <LayoutDashboard size={16} /> Executive Overview
+          </button>
+          <button className={`subtab-btn ${currentTab === 'schemes' ? 'active' : ''}`} onClick={() => switchTab('schemes')}>
+            <BookOpenCheck size={16} /> Scholarship Management ({schemes.length})
           </button>
           <button className={`subtab-btn ${currentTab === 'rules' ? 'active' : ''}`} onClick={() => switchTab('rules')}>
-            <Settings size={16} /> Eligibility Rules
+            <Settings size={16} /> Eligibility Rules ({allRules.length})
           </button>
           <button className={`subtab-btn ${currentTab === 'analytics' ? 'active' : ''}`} onClick={() => switchTab('analytics')}>
             <TrendingUp size={16} /> Evaluation Analytics ({stats.total_evaluations})
@@ -282,8 +340,262 @@ export default function AdminDashboard() {
           </section>
         )}
 
-        {/* TAB 1 & 2: SCHEME DIRECTORY & RULES TABLE */}
-        {(currentTab === 'overview' || currentTab === 'schemes' || currentTab === 'rules') && (
+        {/* =========================================================================
+            TAB 1: EXECUTIVE OVERVIEW (Admin Dashboard)
+           ========================================================================= */}
+        {currentTab === 'overview' && (
+          <div className="tab-pane-fade">
+            {/* Executive Health Hero */}
+            <div className="admin-overview-hero">
+              <div className="hero-status-row">
+                <div className="hero-status-pill">
+                  <span className="live-indicator-dot" />
+                  <strong>System Status: Operational</strong>
+                </div>
+                <span className="hero-sync-time">
+                  <Clock size={13} /> Active Knowledge Base: <strong>{schemes.length} Schemes</strong> · <strong>{allRules.length} Verified Rules</strong>
+                </span>
+              </div>
+              <div className="hero-main-content">
+                <div>
+                  <h2>Administrator Operations &amp; Intelligence Hub</h2>
+                  <p>
+                    Monitor real-time student evaluation traffic, system-wide eligibility rates, knowledge base integrity, and official portal deadlines.
+                  </p>
+                </div>
+                <div className="hero-action-buttons">
+                  <button
+                    className="primary-button"
+                    onClick={() => { setEditingScheme(null); setIsModalOpen(true) }}
+                  >
+                    <Plus size={15} /> Add New Scheme
+                  </button>
+                  <Link to="/admin/algorithms" className="secondary-button hero-link-btn">
+                    <Sparkles size={15} /> AI Control Center
+                  </Link>
+                </div>
+              </div>
+            </div>
+
+            {/* Overall Eligibility Outcome Ratio Bar */}
+            <div className="notif-section-card" style={{ marginBottom: '22px' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px', flexWrap: 'wrap', gap: '8px' }}>
+                <strong style={{ fontSize: '14px', color: 'var(--text-heading)' }}>
+                  System-Wide Student Eligibility Outcomes Distribution
+                </strong>
+                <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>
+                  Total Evaluated Matches: <strong>{totalOutcomes}</strong>
+                </span>
+              </div>
+              <div style={{ display: 'flex', height: '14px', borderRadius: '8px', overflow: 'hidden', background: '#e2e8f0', gap: '2px' }}>
+                <div style={{ width: `${(outcomes.eligible / totalOutcomes) * 100}%`, background: '#22c55e' }} title={`Eligible: ${outcomes.eligible}`} />
+                <div style={{ width: `${(outcomes.ineligible / totalOutcomes) * 100}%`, background: '#ef4444' }} title={`Ineligible: ${outcomes.ineligible}`} />
+                <div style={{ width: `${(outcomes.needs_information / totalOutcomes) * 100}%`, background: '#f59e0b' }} title={`Needs Info: ${outcomes.needs_information}`} />
+                <div style={{ width: `${(outcomes.closed_expired / totalOutcomes) * 100}%`, background: '#94a3b8' }} title={`Closed/Expired: ${outcomes.closed_expired}`} />
+              </div>
+              <div style={{ display: 'flex', gap: '16px', marginTop: '12px', fontSize: '12px', flexWrap: 'wrap' }}>
+                <span style={{ display: 'inline-flex', alignItems: 'center', gap: '5px' }}>
+                  <span style={{ width: '10px', height: '10px', borderRadius: '50%', background: '#22c55e' }} /> Eligible ({Math.round((outcomes.eligible / totalOutcomes) * 100)}%)
+                </span>
+                <span style={{ display: 'inline-flex', alignItems: 'center', gap: '5px' }}>
+                  <span style={{ width: '10px', height: '10px', borderRadius: '50%', background: '#ef4444' }} /> Ineligible ({Math.round((outcomes.ineligible / totalOutcomes) * 100)}%)
+                </span>
+                <span style={{ display: 'inline-flex', alignItems: 'center', gap: '5px' }}>
+                  <span style={{ width: '10px', height: '10px', borderRadius: '50%', background: '#f59e0b' }} /> Needs Info ({Math.round((outcomes.needs_information / totalOutcomes) * 100)}%)
+                </span>
+                <span style={{ display: 'inline-flex', alignItems: 'center', gap: '5px' }}>
+                  <span style={{ width: '10px', height: '10px', borderRadius: '50%', background: '#94a3b8' }} /> Closed ({Math.round((outcomes.closed_expired / totalOutcomes) * 100)}%)
+                </span>
+              </div>
+            </div>
+
+            {/* Two-Column Operational Intelligence Grid */}
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(360px, 1fr))', gap: '20px', marginBottom: '24px' }}>
+              {/* Frequently Unmet Student Criteria */}
+              <div className="notif-section-card">
+                <div className="notif-section-header">
+                  <TrendingUp size={18} style={{ color: '#dc2626' }} />
+                  <h4>Top Student Eligibility Bottlenecks</h4>
+                </div>
+                {unmetList.length === 0 ? (
+                  <p style={{ fontSize: '13px', color: 'var(--text-muted)' }}>No unmet criteria recorded yet.</p>
+                ) : (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                    {unmetList.slice(0, 5).map((item, idx) => (
+                      <div key={idx} style={{ padding: '8px 12px', background: '#f8fafc', borderRadius: '6px', border: '1px solid #e2e8f0' }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '4px' }}>
+                          <strong style={{ fontSize: '13px', color: 'var(--text-heading)' }}>{item.criteria}</strong>
+                          <span style={{ background: '#fee2e2', color: '#991b1b', padding: '2px 8px', borderRadius: '10px', fontSize: '11px', fontWeight: 700 }}>
+                            {item.count} student failures
+                          </span>
+                        </div>
+                        <div style={{ height: '6px', width: '100%', background: '#e2e8f0', borderRadius: '3px', overflow: 'hidden' }}>
+                          <div style={{ width: `${(item.count / maxUnmet) * 100}%`, height: '100%', background: '#ef4444' }} />
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              {/* Impending Deadlines */}
+              <div className="notif-section-card">
+                <div className="notif-section-header">
+                  <Calendar size={18} style={{ color: '#d97706' }} />
+                  <h4>Upcoming Scheme Deadlines (&lt; 45 Days)</h4>
+                </div>
+                {!stats.approaching_deadlines || stats.approaching_deadlines.length === 0 ? (
+                  <p style={{ fontSize: '13px', color: 'var(--text-muted)' }}>No active schemes have approaching deadlines within 45 days.</p>
+                ) : (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                    {stats.approaching_deadlines.slice(0, 5).map((item, idx) => {
+                      const schemeName = item.scholarship_name || item.name || `Scheme #${item.id || item.scholarship_id || idx + 1}`;
+                      const urgencyClass = item.urgency || (item.days_left <= 7 ? 'critical' : 'approaching');
+                      return (
+                        <div key={idx} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '10px 14px', background: item.days_left <= 7 ? '#fff1f2' : '#fffbeb', borderRadius: '8px', border: item.days_left <= 7 ? '1px solid #fecaca' : '1px solid #fed7aa' }}>
+                          <div style={{ flex: 1, minWidth: 0, marginRight: '12px' }}>
+                            <strong style={{ fontSize: '13px', color: 'var(--text-heading)', display: 'block', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }} title={schemeName}>
+                              {schemeName}
+                            </strong>
+                            <small style={{ color: 'var(--text-muted)', fontSize: '11px', display: 'flex', alignItems: 'center', gap: '6px', marginTop: '2px' }}>
+                              <span>Deadline: <b style={{ color: item.days_left <= 7 ? '#b91c1c' : '#b45309' }}>{item.deadline}</b></span>
+                              <span>·</span>
+                              <span>AY: {item.academic_year || '2026-27'}</span>
+                            </small>
+                          </div>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexShrink: 0 }}>
+                            <span className={`urgency-pill ${urgencyClass}`}>
+                              {item.days_left <= 0 ? 'Today' : `${item.days_left}d Left`}
+                            </span>
+                            {item.source_url && (
+                              <a href={item.source_url} target="_blank" rel="noreferrer" title="Open official scheme portal" style={{ color: '#0284c7', display: 'inline-flex', alignItems: 'center', padding: '4px' }}>
+                                <ExternalLink size={13} />
+                              </a>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* Recent Evaluations Audit Trail Preview */}
+            <div className="notif-section-card" style={{ marginBottom: '24px' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '14px', flexWrap: 'wrap', gap: '8px' }}>
+                <div className="notif-section-header" style={{ margin: 0 }}>
+                  <History size={18} style={{ color: '#0284c7' }} />
+                  <h4>Recent Student Evaluation Traces</h4>
+                </div>
+                <button
+                  type="button"
+                  className="small-action-btn"
+                  onClick={() => switchTab('analytics')}
+                >
+                  View Full Analytics Log →
+                </button>
+              </div>
+
+              {evaluations.length === 0 ? (
+                <p style={{ fontSize: '13px', color: 'var(--text-muted)' }}>No student evaluation sessions recorded yet.</p>
+              ) : (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                  {evaluations.slice(0, 4).map(ev => (
+                    <div key={ev.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '10px 14px', background: '#f8fafc', borderRadius: '8px', border: '1px solid #e2e8f0', flexWrap: 'wrap', gap: '10px' }}>
+                      <div>
+                        <strong>Evaluation Event #{ev.id}</strong>
+                        <span style={{ fontSize: '12px', color: '#64748b', marginLeft: '10px' }}>
+                          {ev.student_anonymized?.category || 'Student'} · {ev.student_anonymized?.state || 'India'} · Income ₹{Number(ev.student_anonymized?.annual_income || 0).toLocaleString('en-IN')}
+                        </span>
+                      </div>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                        <span style={{ fontSize: '11px', color: '#94a3b8' }}>
+                          {ev.created_at ? new Date(ev.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : 'Recent'}
+                        </span>
+                        <div style={{ display: 'flex', gap: '4px' }}>
+                          {ev.results_summary?.slice(0, 3).map((r, ri) => (
+                            <span key={ri} className={`pill ${r.status === 'potential_match' ? 'good' : r.status === 'ineligible' ? 'bad' : 'warn'}`} style={{ fontSize: '10px', padding: '1px 6px' }}>
+                              {r.status === 'potential_match' ? '✓ Eligible' : r.status === 'ineligible' ? '✕ Ineligible' : '? Needs Info'}
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {/* Quick Hub Navigation Cards */}
+            <div className="admin-hub-grid">
+              <div className="admin-hub-card">
+                <div>
+                  <div className="stat-icon blue" style={{ marginBottom: '12px' }}><BookOpenCheck size={20} /></div>
+                  <strong style={{ fontSize: '16px', display: 'block', marginBottom: '4px', color: '#0f172a' }}>
+                    Scholarship Management
+                  </strong>
+                  <p style={{ margin: 0, fontSize: '13px', color: '#64748b' }}>
+                    Configure {schemes.length} active scholarships, archive schemes, update award grants, and verify application deadlines.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  className="primary-button"
+                  style={{ marginTop: '16px', alignSelf: 'flex-start' }}
+                  onClick={() => switchTab('schemes')}
+                >
+                  Manage Schemes →
+                </button>
+              </div>
+
+              <div className="admin-hub-card">
+                <div>
+                  <div className="stat-icon purple" style={{ marginBottom: '12px' }}><Settings size={20} /></div>
+                  <strong style={{ fontSize: '16px', display: 'block', marginBottom: '4px', color: '#0f172a' }}>
+                    Eligibility Rules Engine
+                  </strong>
+                  <p style={{ margin: 0, fontSize: '13px', color: '#64748b' }}>
+                    Inspect {allRules.length} deterministic criteria, threshold operators (income, marks %, state), and student failure guidance.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  className="primary-button"
+                  style={{ marginTop: '16px', alignSelf: 'flex-start' }}
+                  onClick={() => switchTab('rules')}
+                >
+                  Inspect Rules →
+                </button>
+              </div>
+
+              <div className="admin-hub-card">
+                <div>
+                  <div className="stat-icon green" style={{ marginBottom: '12px' }}><ShieldCheck size={20} /></div>
+                  <strong style={{ fontSize: '16px', display: 'block', marginBottom: '4px', color: '#0f172a' }}>
+                    Source Verification &amp; Audit
+                  </strong>
+                  <p style={{ margin: 0, fontSize: '13px', color: '#64748b' }}>
+                    Audit government portal links (MahaDBT, NSP, AICTE), review rule changes, and track application deadlines.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  className="primary-button"
+                  style={{ marginTop: '16px', alignSelf: 'flex-start' }}
+                  onClick={() => switchTab('verification')}
+                >
+                  Verify Portals →
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* =========================================================================
+            TAB 2: SCHOLARSHIP MANAGEMENT DIRECTORY TABLE
+           ========================================================================= */}
+        {currentTab === 'schemes' && (
           <section className="admin-table-section">
             <div className="table-controls-bar">
               <div className="search-box">
@@ -438,7 +750,95 @@ export default function AdminDashboard() {
           </section>
         )}
 
-        {/* TAB 3: EVALUATION ANALYTICS */}
+        {/* =========================================================================
+            TAB 3: ELIGIBILITY RULES ENGINE INSPECTOR
+           ========================================================================= */}
+        {currentTab === 'rules' && (
+          <section className="admin-table-section">
+            <div className="section-heading">
+              <div>
+                <span className="step">RULE BASE INSPECTION</span>
+                <h2>Eligibility Rules &amp; Logical Criteria Engine</h2>
+                <p>Inspect deterministic verification conditions, operators, and failure messages across all active schemes.</p>
+              </div>
+              <button className="primary-button" onClick={() => { setEditingScheme(null); setIsModalOpen(true) }}>
+                <Plus size={16} /> Add Scheme &amp; Rules
+              </button>
+            </div>
+
+            <div className="table-controls-bar">
+              <div className="filter-pills">
+                {['all', 'annual_income', 'state', 'category', 'marks_percentage', 'cap_admission', 'attendance_percentage'].map(field => (
+                  <button
+                    key={field}
+                    className={`filter-btn ${ruleFieldFilter === field ? 'active' : ''}`}
+                    onClick={() => setRuleFieldFilter(field)}
+                  >
+                    {field === 'all' ? `All Criteria (${allRules.length})` : field.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase())}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div className="table-card">
+              <table className="admin-table">
+                <thead>
+                  <tr>
+                    <th>Scheme Name</th>
+                    <th>Target Fact Field</th>
+                    <th>Evaluation Operator</th>
+                    <th>Required Value</th>
+                    <th>Failure Guidance Message</th>
+                    <th>Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {filteredRules.map(r => (
+                    <tr key={r.id}>
+                      <td>
+                        <strong>{r.scheme_name}</strong>
+                        <div style={{ fontSize: '11px', color: '#64748b' }}>Scheme #{r.scheme_id} · v{r.scheme.version || 1}</div>
+                      </td>
+                      <td>
+                        <code className="inline-code" style={{ fontWeight: 700, color: '#0369a1' }}>{r.field}</code>
+                      </td>
+                      <td>
+                        <span style={{ fontWeight: 700, color: '#7c3aed' }}>
+                          {r.operator === 'lte' ? '≤ (Less than or equal)' :
+                           r.operator === 'gte' ? '≥ (Greater than or equal)' :
+                           r.operator === 'eq' ? '= (Exact match)' :
+                           r.operator === 'in' ? '∈ (One of array)' : r.operator}
+                        </span>
+                      </td>
+                      <td>
+                        <strong style={{ color: '#0f172a' }}>
+                          {typeof r.value === 'number' && r.field.includes('income')
+                            ? `₹${r.value.toLocaleString('en-IN')}`
+                            : Array.isArray(r.value) ? r.value.join(', ') : String(r.value)}
+                        </strong>
+                      </td>
+                      <td style={{ fontSize: '13px', color: '#475569', maxWidth: '360px' }}>
+                        {r.message}
+                      </td>
+                      <td>
+                        <button
+                          type="button"
+                          className="table-icon-btn edit"
+                          onClick={() => { setEditingScheme(r.scheme); setIsModalOpen(true) }}
+                          title="Edit this rule in scheme editor"
+                        >
+                          <Edit2 size={15} />
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </section>
+        )}
+
+        {/* TAB 4: EVALUATION ANALYTICS */}
         {currentTab === 'analytics' && (() => {
           const outcomes = stats.evaluation_outcomes || {
             eligible: stats.evaluation_metrics?.eligible_matches || 0,
@@ -568,17 +968,34 @@ export default function AdminDashboard() {
                     <p style={{ fontSize: '13px', color: 'var(--text-muted)' }}>No active schemes have approaching deadlines within 45 days.</p>
                   ) : (
                     <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
-                      {stats.approaching_deadlines.map((item, idx) => (
-                        <div key={idx} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '10px 14px', background: item.days_left <= 7 ? '#fff1f2' : '#fffbeb', borderRadius: '6px', border: '1px solid #e2e8f0' }}>
-                          <div>
-                            <strong style={{ fontSize: '13px', color: 'var(--text-heading)', display: 'block' }}>{item.scholarship_name}</strong>
-                            <small style={{ color: 'var(--text-muted)' }}>Deadline: {item.deadline} · AY: {item.academic_year || '2024-25'}</small>
+                      {stats.approaching_deadlines.map((item, idx) => {
+                        const schemeName = item.scholarship_name || item.name || `Scheme #${item.id || item.scholarship_id || idx + 1}`;
+                        const urgencyClass = item.urgency || (item.days_left <= 7 ? 'critical' : 'approaching');
+                        return (
+                          <div key={idx} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '10px 14px', background: item.days_left <= 7 ? '#fff1f2' : '#fffbeb', borderRadius: '8px', border: item.days_left <= 7 ? '1px solid #fecaca' : '1px solid #fed7aa' }}>
+                            <div style={{ flex: 1, minWidth: 0, marginRight: '12px' }}>
+                              <strong style={{ fontSize: '13px', color: 'var(--text-heading)', display: 'block', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }} title={schemeName}>
+                                {schemeName}
+                              </strong>
+                              <small style={{ color: 'var(--text-muted)', fontSize: '11px', display: 'flex', alignItems: 'center', gap: '6px', marginTop: '2px' }}>
+                                <span>Deadline: <b style={{ color: item.days_left <= 7 ? '#b91c1c' : '#b45309' }}>{item.deadline}</b></span>
+                                <span>·</span>
+                                <span>AY: {item.academic_year || '2026-27'}</span>
+                              </small>
+                            </div>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexShrink: 0 }}>
+                              <span className={`urgency-pill ${urgencyClass}`}>
+                                {item.days_left <= 0 ? 'Today' : `${item.days_left}d Left`}
+                              </span>
+                              {item.source_url && (
+                                <a href={item.source_url} target="_blank" rel="noreferrer" title="Open official scheme portal" style={{ color: '#0284c7', display: 'inline-flex', alignItems: 'center', padding: '4px' }}>
+                                  <ExternalLink size={13} />
+                                </a>
+                              )}
+                            </div>
                           </div>
-                          <span className={`urgency-pill ${item.urgency}`}>
-                            {item.days_left <= 0 ? 'Today' : `${item.days_left}d Left`}
-                          </span>
-                        </div>
-                      ))}
+                        );
+                      })}
                     </div>
                   )}
                 </div>

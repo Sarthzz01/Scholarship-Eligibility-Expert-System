@@ -32,15 +32,19 @@ import {
 import { useAuth, API_BASE } from '../context/AuthContext'
 import Sidebar from '../components/Sidebar'
 import StatusPill from '../components/StatusPill'
+import AIChatbot from '../components/AIChatbot'
 
 const ALL_DOCUMENTS = [
   'Income Certificate',
   'Caste Certificate',
+  'Caste Validity Certificate',
   'Domicile Certificate',
   'Mark Sheet',
+  'Class 12 Mark Sheet',
   'Fee Receipt',
   'CAP Allotment Letter',
-  'College Bonafide Certificate'
+  'College Bonafide Certificate',
+  'Aadhaar Linked Bank Passbook'
 ]
 
 export default function StudentDashboard() {
@@ -81,6 +85,7 @@ export default function StudentDashboard() {
   const [trackingSuccessMsg, setTrackingSuccessMsg] = useState('')
   const [activeNoteEditId, setActiveNoteEditId] = useState(null)
   const [tempNoteText, setTempNoteText] = useState('')
+  const [isFloatingChatOpen, setIsFloatingChatOpen] = useState(false)
 
   // UI state
   const [loading, setLoading] = useState(false)
@@ -163,6 +168,27 @@ export default function StudentDashboard() {
     if (idx >= 0) docs.splice(idx, 1)
     else docs.push(doc)
     updateField('available_documents', docs)
+  }
+
+  // Quick-add document directly from requirements alert cards
+  async function handleQuickAddDocument(docName) {
+    const updatedDocs = [...(profile.available_documents || [])]
+    if (!updatedDocs.includes(docName)) {
+      updatedDocs.push(docName)
+    }
+    const updatedProfile = { ...profile, available_documents: updatedDocs }
+    setProfile(updatedProfile)
+    try {
+      await authFetch(`${API_BASE}/student/profile`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(updatedProfile)
+      })
+      const notifRes = await authFetch(`${API_BASE}/student/notifications`)
+      if (notifRes.ok) setNotifications(await notifRes.json())
+    } catch (err) {
+      console.error('Failed to update document', err)
+    }
   }
 
   // Save profile to backend
@@ -316,51 +342,64 @@ export default function StudentDashboard() {
           </div>
         )}
 
-        {/* Profile Completeness Banner */}
-        <section className="profile-banner">
-          <div className="profile-banner-content">
-            <div className="progress-info">
-              <span className="banner-badge"><Sparkles size={14} /> Profile Status</span>
-              <h3>Profile Completeness: <strong>{completeness}%</strong></h3>
-              <p>Keep your academic marks, annual family income, and category verified for accurate matching.</p>
-            </div>
-            <div className="progress-track">
-              <div className="progress-fill" style={{ width: `${completeness}%` }} />
-            </div>
-          </div>
-          <button className="banner-edit-btn" onClick={() => switchTab('profile')}>
-            <User size={15} /> Update Profile
-          </button>
-        </section>
-
         {/* Subtabs for Student */}
         <div className="dashboard-subtabs">
           <button className={`subtab-btn ${currentTab === 'overview' ? 'active' : ''}`} onClick={() => switchTab('overview')}>
-            <BookOpenCheck size={16} /> Overview &amp; Checker
+            <BookOpenCheck size={16} /> Dashboard
           </button>
           <button className={`subtab-btn ${currentTab === 'eligible' ? 'active' : ''}`} onClick={() => switchTab('eligible')}>
-            <Award size={16} /> Eligible Scholarships ({eligibleList.length})
+            <Award size={16} /> Eligible Scholarships
+            {eligibleList.length > 0 && <span className="tab-pill-badge success">{eligibleList.length}</span>}
           </button>
           <button className={`subtab-btn ${currentTab === 'improve' ? 'active' : ''}`} onClick={() => switchTab('improve')}>
-            <TrendingUp size={16} /> Actionable Guidance ({requiresActionList.length + needsInfoList.length})
+            <TrendingUp size={16} /> Actionable Guidance
+            {(requiresActionList.length + needsInfoList.length) > 0 && (
+              <span className="tab-pill-badge warn">{requiresActionList.length + needsInfoList.length}</span>
+            )}
           </button>
           <button className={`subtab-btn ${currentTab === 'tracker' ? 'active' : ''}`} onClick={() => switchTab('tracker')}>
-            <FileCheck2 size={16} /> Application Tracker ({applications.length})
+            <FileCheck2 size={16} /> Application Tracker
+            {applications.length > 0 && <span className="tab-pill-badge">{applications.length}</span>}
           </button>
           <button className={`subtab-btn ${currentTab === 'notifications' ? 'active' : ''}`} onClick={() => switchTab('notifications')}>
-            <Bell size={16} /> Deadlines &amp; Alerts ({notifications.total_notifications || 0})
+            <Bell size={16} /> Deadlines &amp; Alerts
+            {(notifications.total_notifications || 0) > 0 && (
+              <span className="tab-pill-badge alert">{notifications.total_notifications}</span>
+            )}
           </button>
           <button className={`subtab-btn ${currentTab === 'profile' ? 'active' : ''}`} onClick={() => switchTab('profile')}>
-            <User size={16} /> My Profile &amp; Documents
+            <User size={16} /> My Profile
+          </button>
+          <button className={`subtab-btn ${currentTab === 'ai-chat' ? 'active' : ''}`} onClick={() => switchTab('ai-chat')}>
+            <Sparkles size={16} /> AI Chatbot
+            <span className="tab-pill-badge ai">AI</span>
           </button>
           <button className={`subtab-btn ${currentTab === 'history' ? 'active' : ''}`} onClick={() => switchTab('history')}>
-            <History size={16} /> Evaluation History ({evalHistory.length})
+            <History size={16} /> History
+            {evalHistory.length > 0 && <span className="tab-pill-badge">{evalHistory.length}</span>}
           </button>
         </div>
 
-        {/* TAB 1: OVERVIEW & QUICK CHECKER */}
+        {/* TAB 1: OVERVIEW & DASHBOARD */}
         {currentTab === 'overview' && (
           <div className="tab-pane-fade">
+            {/* Profile Completeness Banner - only displayed in Dashboard */}
+            <section className="profile-banner">
+              <div className="profile-banner-content">
+                <div className="progress-info">
+                  <span className="banner-badge"><Sparkles size={14} /> Profile Status</span>
+                  <h3>Profile Completeness: <strong>{completeness}%</strong></h3>
+                  <p>Keep your academic marks, annual family income, and category verified for accurate matching.</p>
+                </div>
+                <div className="progress-track">
+                  <div className="progress-fill" style={{ width: `${completeness}%` }} />
+                </div>
+              </div>
+              <button className="banner-edit-btn" onClick={() => switchTab('profile')}>
+                <User size={15} /> Update Profile
+              </button>
+            </section>
+
             <section className="stats-grid">
               <div className="stat-card">
                 <div className="stat-icon green"><Award size={20} /></div>
@@ -986,31 +1025,106 @@ export default function StudentDashboard() {
                   <h4>Required Documents Alerts ({notifications.missing_documents_alerts?.length || 0})</h4>
                 </div>
 
+                {/* Document Readiness Progress Bar */}
+                <div className="docs-readiness-banner">
+                  <div className="readiness-meta">
+                    <div>
+                      <span className="readiness-tag">
+                        <ShieldCheck size={13} /> Document Verification Readiness
+                      </span>
+                      <strong>
+                        {profile.available_documents?.length || 0} of {ALL_DOCUMENTS.length} Common Certificates Prepared
+                      </strong>
+                      <p>
+                        Keep these certificates ready to avoid application rejections on official portals (MahaDBT / NSP).
+                      </p>
+                    </div>
+                    <div className="readiness-stat">
+                      <span className="stat-number">
+                        {Math.round(((profile.available_documents?.length || 0) / ALL_DOCUMENTS.length) * 100)}%
+                      </span>
+                      <small>Readiness</small>
+                    </div>
+                  </div>
+                  <div className="readiness-track">
+                    <div
+                      className="readiness-fill"
+                      style={{
+                        width: `${Math.min(100, Math.round(((profile.available_documents?.length || 0) / ALL_DOCUMENTS.length) * 100))}%`
+                      }}
+                    />
+                  </div>
+                </div>
+
                 {!notifications.missing_documents_alerts || notifications.missing_documents_alerts.length === 0 ? (
-                  <p style={{ fontSize: '13px', color: 'var(--text-muted)', margin: '4px 0' }}>
-                    Great job! You have marked all common certificates as available in your profile checklist.
-                  </p>
+                  <div className="docs-all-cleared-card">
+                    <CheckCircle2 size={30} style={{ color: '#16a34a' }} />
+                    <div>
+                      <strong>All Essential Documents Prepared!</strong>
+                      <p>Great job! You have marked all required certificates as available in your profile checklist.</p>
+                    </div>
+                  </div>
                 ) : (
                   <div className="notif-items-list">
-                    {notifications.missing_documents_alerts.map((docItem, idx) => (
-                      <div key={idx} className="notif-item warning">
-                        <div className="notif-item-content">
-                          <CircleAlert size={16} style={{ color: '#d97706', marginTop: '2px' }} />
-                          <div>
-                            <h5>Missing: {docItem.document}</h5>
-                            <p>Required by: {docItem.required_by_schemes?.join(', ')}</p>
+                    {notifications.missing_documents_alerts.map((docItem, idx) => {
+                      const docName = docItem.document || docItem.missing_documents?.[0] || 'Certificate'
+                      const schemesList = docItem.required_by_schemes || (docItem.scholarship_name ? [docItem.scholarship_name] : [])
+                      const tip = docItem.guidance_tip || 'Verify and obtain from the authorized college or state authority.'
+
+                      return (
+                        <div key={idx} className="doc-alert-card">
+                          <div className="doc-alert-top">
+                            <div className="doc-alert-title-row">
+                              <span className="doc-alert-icon">
+                                <FileText size={18} />
+                              </span>
+                              <div>
+                                <h5 className="doc-name">{docName}</h5>
+                                <span className="doc-impact-badge">
+                                  ⚠️ Required by {schemesList.length} Scheme{schemesList.length === 1 ? '' : 's'}
+                                </span>
+                              </div>
+                            </div>
+                            <div className="doc-alert-actions">
+                              <button
+                                type="button"
+                                className="btn-quick-add-doc"
+                                onClick={() => handleQuickAddDocument(docName)}
+                                title="Click to mark this certificate as available in your profile"
+                              >
+                                <Check size={14} /> I Have This
+                              </button>
+                              <button
+                                type="button"
+                                className="btn-track-action"
+                                style={{ padding: '6px 12px', fontSize: '12px' }}
+                                onClick={() => switchTab('profile')}
+                              >
+                                Checklist in Profile →
+                              </button>
+                            </div>
                           </div>
+
+                          <div className="doc-guidance-box">
+                            <Info size={14} />
+                            <span>{tip}</span>
+                          </div>
+
+                          {schemesList.length > 0 && (
+                            <div className="doc-schemes-list">
+                              <span className="schemes-label">Needed for:</span>
+                              <div className="schemes-chips-wrap">
+                                {schemesList.map((sName, sIdx) => (
+                                  <span key={sIdx} className="scheme-tag-pill">
+                                    {sName}
+                                  </span>
+                                ))}
+                              </div>
+                            </div>
+                          )}
                         </div>
-                        <button
-                          type="button"
-                          className="btn-track-action"
-                          style={{ padding: '5px 10px', fontSize: '12px' }}
-                          onClick={() => switchTab('profile')}
-                        >
-                          Checkmark in Profile →
-                        </button>
-                      </div>
-                    ))}
+                      )
+                    })}
                   </div>
                 )}
               </section>
@@ -1028,25 +1142,29 @@ export default function StudentDashboard() {
                   </p>
                 ) : (
                   <div className="notif-items-list">
-                    {notifications.profile_warnings.map((warn, idx) => (
-                      <div key={idx} className="notif-item info">
-                        <div className="notif-item-content">
-                          <Info size={16} style={{ color: '#2563eb', marginTop: '2px' }} />
-                          <div>
-                            <h5>{warn.title}</h5>
-                            <p>{warn.message}</p>
+                    {notifications.profile_warnings.map((warn, idx) => {
+                      const title = typeof warn === 'string' ? warn : (warn.title || warn.message)
+                      const message = typeof warn === 'string' ? '' : (warn.message || '')
+                      return (
+                        <div key={idx} className="notif-item info">
+                          <div className="notif-item-content">
+                            <Info size={16} style={{ color: '#2563eb', marginTop: '2px' }} />
+                            <div>
+                              <h5>{title}</h5>
+                              {message && message !== title && <p>{message}</p>}
+                            </div>
                           </div>
+                          <button
+                            type="button"
+                            className="btn-track-action"
+                            style={{ padding: '5px 10px', fontSize: '12px' }}
+                            onClick={() => switchTab('profile')}
+                          >
+                            Update Profile →
+                          </button>
                         </div>
-                        <button
-                          type="button"
-                          className="btn-track-action"
-                          style={{ padding: '5px 10px', fontSize: '12px' }}
-                          onClick={() => switchTab('profile')}
-                        >
-                          Update →
-                        </button>
-                      </div>
-                    ))}
+                      )
+                    })}
                   </div>
                 )}
               </section>
@@ -1171,6 +1289,51 @@ export default function StudentDashboard() {
                 ))}
               </div>
             )}
+          </div>
+        )}
+
+        {/* TAB 8: AI CHATBOT ASSISTANT */}
+        {currentTab === 'ai-chat' && (
+          <div className="tab-pane-fade">
+            <div className="directory-intro">
+              <h2>AI Scholarship Assistant</h2>
+              <p>Ask anything about eligibility rules, required certificates, application deadlines, and official portals.</p>
+            </div>
+            <AIChatbot
+              studentProfile={profile}
+              onTrackScheme={handleTrackScheme}
+              trackedScholarshipIds={trackedScholarshipIds}
+            />
+          </div>
+        )}
+
+        {/* Floating AI Chatbot Trigger Button & Modal */}
+        {!isFloatingChatOpen && currentTab !== 'ai-chat' && (
+          <button
+            type="button"
+            className="floating-chat-trigger-btn"
+            onClick={() => setIsFloatingChatOpen(true)}
+            title="Open AI Scholarship Chatbot"
+          >
+            <div className="floating-trigger-icon-wrap">
+              <Sparkles size={18} />
+              <span className="floating-pulse-badge" />
+            </div>
+            <span>Ask AI Chatbot</span>
+          </button>
+        )}
+
+        {isFloatingChatOpen && (
+          <div className="floating-chat-overlay" onClick={() => setIsFloatingChatOpen(false)}>
+            <div onClick={e => e.stopPropagation()}>
+              <AIChatbot
+                studentProfile={profile}
+                onTrackScheme={handleTrackScheme}
+                trackedScholarshipIds={trackedScholarshipIds}
+                isFloating={true}
+                onClose={() => setIsFloatingChatOpen(false)}
+              />
+            </div>
           </div>
         )}
       </main>

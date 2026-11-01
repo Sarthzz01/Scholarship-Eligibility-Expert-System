@@ -93,6 +93,13 @@ export default function Sidebar({ currentTab, onTabSelect }) {
             <History size={18} /> Deadlines &amp; Alerts
           </Link>
           <Link
+            to="/student/dashboard?tab=ai-chat"
+            onClick={() => handleNav('ai-chat', '/student/dashboard')}
+            className={`nav-item ${currentTab === 'ai-chat' ? 'active' : ''}`}
+          >
+            <Sparkles size={18} /> AI Chatbot
+          </Link>
+          <Link
             to="/student/dashboard?tab=history"
             onClick={() => handleNav('history', '/student/dashboard')}
             className={`nav-item ${currentTab === 'history' ? 'active' : ''}`}

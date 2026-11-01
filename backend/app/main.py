@@ -3,6 +3,10 @@ import os
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from typing import Optional, List, Dict, Any
+from dotenv import load_dotenv
+
+# Load environment variables from .env file
+load_dotenv()
 
 from fastapi import Depends, FastAPI, HTTPException, status
 from fastapi.middleware.cors import CORSMiddleware
@@ -31,6 +35,8 @@ from .schemas import (
     RuleValidationRequest,
     RuleValidationResponse,
     RuleAuditLogOut,
+    ChatRequest,
+    ChatResponse,
 )
 from .seed import seed_schemes
 from .auth import (
@@ -48,6 +54,7 @@ from .ai_bfs import build_knowledge_graph, run_bfs
 from .ai_dfs import run_dfs, run_dfs_graph
 from .ai_hill_climbing import run_hill_climbing
 from .ai_astar import run_astar_planner
+from .ai_chatbot import process_chat_query
 from .test_suite_runner import run_academic_test_suite
 
 @asynccontextmanager
@@ -559,9 +566,15 @@ def get_admin_stats(user: User = Depends(require_admin), db: Session = Depends(g
                 if 0 <= days_left <= 45:
                     approaching_deadlines.append({
                         "id": s.id,
+                        "scholarship_id": s.id,
                         "name": s.name,
+                        "scholarship_name": s.name,
                         "deadline": s.deadline,
-                        "days_left": days_left
+                        "days_left": days_left,
+                        "urgency": "critical" if days_left <= 7 else "approaching",
+                        "academic_year": s.academic_year or "2026-2027",
+                        "source_url": s.source_url,
+                        "state": s.state or "All India"
                     })
             except Exception:
                 pass
@@ -829,17 +842,39 @@ def get_student_notifications(user: User = Depends(require_student), db: Session
         except Exception:
             pass
 
+    DOC_TIPS = {
+        "Fee Receipt": "College tuition / admission fee receipt for current academic year.",
+        "CAP Allotment Letter": "Official CAP allotment letter issued by State CET Cell / DTE Maharashtra.",
+        "College Bonafide Certificate": "Original Bonafide Certificate issued by College Principal/Dean.",
+        "Caste Certificate": "Caste certificate issued by Competent Authority / Sub-Divisional Officer.",
+        "Caste Validity Certificate": "Mandatory caste validity certificate issued by Divisional Scrutiny Committee.",
+        "Class 12 Mark Sheet": "HSC / 12th standard passing certificate and mark sheet.",
+        "Aadhaar Linked Bank Passbook": "Bank passbook of Aadhaar-seeded bank account for DBT payment.",
+        "Income Certificate": "Annual income certificate from Tehsildar / SDO office for FY 2025-26."
+    }
+
     profile_warnings = []
     if not profile or profile.annual_income is None:
-        profile_warnings.append("Annual family income is missing. Scholarship matching may be incomplete.")
+        profile_warnings.append({
+            "title": "Annual Family Income Missing",
+            "message": "Annual family income is missing. Scholarship matching and fee concession calculation cannot be verified.",
+            "field": "annual_income"
+        })
     if not profile or profile.marks_percentage is None:
-        profile_warnings.append("Qualifying marks percentage is not set.")
+        profile_warnings.append({
+            "title": "Qualifying Marks Missing",
+            "message": "Qualifying marks percentage is not set. Merit-based scholarships require verified percentage.",
+            "field": "marks_percentage"
+        })
     if not profile or not profile.state:
-        profile_warnings.append("Domicile state is not set.")
+        profile_warnings.append({
+            "title": "Domicile State Missing",
+            "message": "Domicile state is not set. State-specific schemes (like MahaDBT) require verified domicile.",
+            "field": "state"
+        })
 
     active_schemes = db.query(Scholarship).filter(Scholarship.is_active == True, Scholarship.is_archived == False).all()
     approaching_deadlines = []
-    missing_docs_alerts = []
     now = datetime.now(timezone.utc)
 
     for s in active_schemes:
@@ -850,33 +885,50 @@ def get_student_notifications(user: User = Depends(require_student), db: Session
                 days_left = (dl_dt - now).days
                 if 0 <= days_left <= 30:
                     approaching_deadlines.append({
+                        "id": s.id,
                         "scholarship_id": s.id,
+                        "name": s.name,
                         "scholarship_name": s.name,
                         "deadline": s.deadline,
                         "days_left": days_left,
-                        "urgency": "critical" if days_left <= 7 else "warning"
+                        "urgency": "critical" if days_left <= 7 else "approaching",
+                        "academic_year": s.academic_year or "2026-2027",
+                        "source_url": s.source_url
                     })
             except Exception:
                 pass
 
+    # Aggregate Missing Documents across all active schemes
+    doc_map = {}
+    for s in active_schemes:
         if s.required_documents_json:
             try:
                 req_docs = json.loads(s.required_documents_json)
-                needed = [d for d in req_docs if d not in avail_docs]
-                if needed and len(needed) <= 2:
-                    missing_docs_alerts.append({
-                        "scholarship_id": s.id,
-                        "scholarship_name": s.name,
-                        "missing_documents": needed
-                    })
+                for d in req_docs:
+                    if d not in avail_docs:
+                        if d not in doc_map:
+                            doc_map[d] = {
+                                "document": d,
+                                "required_by_schemes": [],
+                                "scheme_ids": [],
+                                "count": 0,
+                                "guidance_tip": DOC_TIPS.get(d, "Verify and obtain from the authorized college or state authority.")
+                            }
+                        if s.name not in doc_map[d]["required_by_schemes"]:
+                            doc_map[d]["required_by_schemes"].append(s.name)
+                            doc_map[d]["scheme_ids"].append(s.id)
+                            doc_map[d]["count"] += 1
             except Exception:
                 pass
 
+    missing_docs_alerts = list(doc_map.values())
+    missing_docs_alerts.sort(key=lambda x: x["count"], reverse=True)
+
     return {
         "approaching_deadlines": approaching_deadlines,
-        "missing_documents_alerts": missing_docs_alerts[:5],
+        "missing_documents_alerts": missing_docs_alerts,
         "profile_warnings": profile_warnings,
-        "total_notifications": len(approaching_deadlines) + len(profile_warnings)
+        "total_notifications": len(approaching_deadlines) + len(missing_docs_alerts) + len(profile_warnings)
     }
 
 # --- Authoritative Evaluation Endpoint with Actionable Student Guidance ---
@@ -918,6 +970,49 @@ def evaluate(
         "results": results,
         "student_guidance": guidance
     }
+
+# --- AI Chatbot Assistant Endpoint ---
+
+@app.post("/api/chat", response_model=ChatResponse)
+def chat_with_ai(
+    payload: ChatRequest,
+    current_user: Optional[User] = Depends(get_optional_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Student-facing AI Chatbot Assistant.
+    Provides natural language advice, eligibility evaluation against active schemes,
+    deadline alerts, and required document assistance.
+    """
+    student_data = None
+    if payload.student:
+        student_data = payload.student.model_dump()
+    elif current_user and current_user.role == "student":
+        prof = db.query(StudentProfileModel).filter(StudentProfileModel.user_id == current_user.id).first()
+        if prof:
+            avail_docs = []
+            if prof.available_documents_json:
+                try:
+                    avail_docs = json.loads(prof.available_documents_json)
+                except Exception:
+                    pass
+            student_data = {
+                "state": prof.state,
+                "category": prof.category,
+                "annual_income": prof.annual_income,
+                "marks_percentage": prof.marks_percentage,
+                "course_level": prof.course_level,
+                "course_type": prof.course_type,
+                "attendance_percentage": prof.attendance_percentage,
+                "cap_admission": prof.cap_admission,
+                "receiving_other_scholarship": prof.receiving_other_scholarship,
+                "passed_previous_year": prof.passed_previous_year,
+                "is_fresh_application": prof.is_fresh_application,
+                "available_documents": avail_docs,
+            }
+
+    history_dicts = [m.model_dump() for m in payload.history] if payload.history else []
+    return process_chat_query(payload.message, student_data, history_dicts, db)
 
 @app.get("/api/evaluations")
 def evaluation_history(limit: int = 20, user: User = Depends(require_admin), db: Session = Depends(get_db)):
